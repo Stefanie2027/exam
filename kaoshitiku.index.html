@@ -1,0 +1,1171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>微信扫码答题 - 《考试题库》专项测评</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome 图标库 -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- SheetJS (Excel解析备用) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- QRCode.js (二维码生成) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- Canvas Confetti 烟花庆祝效果 -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            wechat: '#07C160',
+            wechatDark: '#06ad56',
+            wechatBg: '#EDEDED',
+            wechatCard: '#FFFFFF',
+            primary: '#10B981',
+          },
+          animation: {
+            'pop': 'pop 0.25s ease-out',
+            'slide-in': 'slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+          },
+          keyframes: {
+            pop: {
+              '0%': { transform: 'scale(0.96)', opacity: '0.8' },
+              '100%': { transform: 'scale(1)', opacity: '1' },
+            },
+            slideIn: {
+              '0%': { transform: 'translateY(12px)', opacity: '0' },
+              '100%': { transform: 'translateY(0)', opacity: '1' },
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    .wechat-capsule {
+      border: 0.5px solid rgba(0, 0, 0, 0.15);
+      border-radius: 20px;
+      backdrop-filter: blur(8px);
+      background: rgba(255, 255, 255, 0.7);
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 h-screen w-screen overflow-hidden flex flex-col md:flex-row">
+
+  <!-- ======================= 桌面端辅助控制面板 (左侧/顶部) ======================= -->
+  <aside class="w-full md:w-80 lg:w-96 bg-white border-r border-slate-200 flex flex-col z-20 shadow-md">
+    <!-- 头部工具栏 -->
+    <div class="p-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-emerald-600 to-teal-700 text-white">
+      <div class="flex items-center space-x-2.5">
+        <i class="fa-solid fa-file-excel text-2xl text-emerald-200"></i>
+        <div>
+          <h1 class="font-bold text-base leading-tight">考试题库.xlsx 答题端</h1>
+          <p class="text-xs text-emerald-100">已内置加载您的表格题目</p>
+        </div>
+      </div>
+      <span class="text-xs bg-white/20 px-2.5 py-0.5 rounded-full font-mono font-semibold" id="totalQuestionsBadge">10 题</span>
+    </div>
+
+    <!-- 侧边可滚动控制区域 -->
+    <div class="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar">
+      
+      <!-- 二维码卡片 -->
+      <div class="bg-emerald-50/70 border border-emerald-100 rounded-2xl p-4 flex flex-col items-center text-center">
+        <div class="flex items-center justify-between w-full mb-3">
+          <span class="text-xs font-bold text-emerald-800 uppercase tracking-wider flex items-center">
+            <i class="fa-solid fa-qrcode mr-1.5 text-emerald-600"></i>微信扫码答题
+          </span>
+          <span class="text-[11px] text-emerald-700 bg-emerald-100/80 font-medium px-2 py-0.5 rounded-full">直接扫码体验</span>
+        </div>
+        
+        <!-- 二维码渲染容器 -->
+        <div class="p-2.5 bg-white rounded-xl shadow-sm border border-emerald-100 mb-3" id="qrcodeWrapper">
+          <div id="qrcodeCanvas" class="flex justify-center items-center"></div>
+        </div>
+        
+        <p class="text-xs text-slate-600 mb-2 px-1 leading-relaxed">
+          微信扫描二维码，可直接在手机上以**全屏小程序视觉**进行答题。
+        </p>
+
+        <!-- 针对无法扫码访问的环境智能提示与自定义地址 -->
+        <div id="sandboxNotice" class="w-full text-left bg-amber-50 border border-amber-200/80 rounded-xl p-2.5 mb-3 hidden">
+          <div class="flex items-start space-x-1.5 text-[11px] text-amber-800">
+            <i class="fa-solid fa-circle-exclamation text-amber-600 mt-0.5 flex-shrink-0"></i>
+            <div>
+              <p class="font-bold">为什么扫码无法打开？</p>
+              <p class="text-[10px] text-amber-700 leading-tight mt-0.5">
+                当前运行在开发预览沙箱中，手机无法跨网访问此临时内网地址。您可以将此 HTML 文件发布到 GitHub Pages、Vercel 或局域网服务器，或者在下方填入您的公网网址生成二维码。
+              </p>
+            </div>
+          </div>
+          <div class="mt-2 flex space-x-1">
+            <input id="customUrlInput" type="text" placeholder="https://您的域名/或局域网IP" class="flex-1 text-[11px] px-2 py-1 border border-amber-300 rounded bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+            <button onclick="updateCustomQrCode()" class="px-2.5 py-1 text-[11px] bg-emerald-600 text-white rounded font-medium hover:bg-emerald-700">更新码</button>
+          </div>
+        </div>
+
+        <div class="flex space-x-2 w-full">
+          <button onclick="downloadQrCode()" class="flex-1 py-2 px-3 text-xs bg-white text-emerald-700 font-medium rounded-lg border border-emerald-200 hover:bg-emerald-100 transition shadow-sm flex items-center justify-center">
+            <i class="fa-solid fa-download mr-1.5"></i>保存二维码
+          </button>
+          <button onclick="copyShareLink()" class="flex-1 py-2 px-3 text-xs bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-700 transition shadow-sm flex items-center justify-center">
+            <i class="fa-solid fa-link mr-1.5"></i>复制答题链接
+          </button>
+        </div>
+      </div>
+
+      <!-- 题库预览列表 -->
+      <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+        <div class="flex items-center justify-between mb-2.5">
+          <h3 class="text-xs font-bold text-slate-700 flex items-center">
+            <i class="fa-solid fa-list-check mr-1.5 text-emerald-600"></i>已收录的试题清单
+          </h3>
+          <span class="text-[11px] text-slate-400 font-mono" id="currentQCount">共 10 题</span>
+        </div>
+        <div id="sidebarQuestionList" class="max-h-56 overflow-y-auto space-y-1.5 pr-1 text-xs">
+          <!-- 动态插入题目前缀与标题 -->
+        </div>
+      </div>
+
+      <!-- 补充上传新题库 -->
+      <div class="bg-slate-50 border border-slate-200 rounded-2xl p-3.5">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold text-slate-700">更新或替换表格题库</span>
+          <label for="excelFileInput" class="text-xs text-emerald-600 font-medium cursor-pointer hover:underline flex items-center">
+            <i class="fa-solid fa-upload mr-1"></i>重新上传
+          </label>
+        </div>
+        <input id="excelFileInput" type="file" accept=".xlsx, .xls, .csv" class="hidden" onchange="handleExcelUpload(event)">
+      </div>
+
+    </div>
+
+    <!-- 底部状态说明 -->
+    <div class="p-3 border-t border-slate-100 bg-slate-50 text-[11px] text-slate-500 flex items-center justify-between">
+      <span><i class="fa-solid fa-circle-check text-emerald-500 mr-1"></i>每题单页·提交即显答案</span>
+      <span class="text-slate-400">已就绪</span>
+    </div>
+  </aside>
+
+  <!-- ======================= 微信小程序主视窗 (右侧界面) ======================= -->
+  <main class="flex-1 bg-slate-200 flex items-center justify-center p-0 md:p-6 overflow-hidden relative">
+    
+    <!-- 模拟移动端外壳 (桌面展示 iPhone 级精致仿真壳，移动端扫码自适应全屏) -->
+    <div id="mobileFrame" class="w-full h-full md:w-[414px] md:h-[860px] md:max-h-[94vh] bg-white md:rounded-[44px] md:shadow-2xl overflow-hidden flex flex-col relative border-0 md:border-[10px] md:border-slate-900">
+      
+      <!-- 微信原生导航栏 (NavigationBar) -->
+      <header class="bg-white border-b border-slate-100 pt-3 md:pt-4 pb-2.5 px-4 flex items-center justify-between sticky top-0 z-30 select-none">
+        <!-- 左侧返回/主页 -->
+        <div class="flex items-center space-x-2">
+          <button id="navBackBtn" onclick="goHome()" class="text-slate-700 text-sm hover:opacity-70 p-1">
+            <i class="fa-solid fa-house"></i>
+          </button>
+          <span id="navTitle" class="font-bold text-sm text-slate-900 tracking-tight">考试题库在线测评</span>
+        </div>
+
+        <!-- 微信经典右上角胶囊组件 -->
+        <div class="wechat-capsule flex items-center px-2 py-1 space-x-2 text-slate-800 text-xs">
+          <button onclick="showMiniProgramMenu()" title="小程序选项" class="hover:opacity-70 px-1">
+            <i class="fa-solid fa-ellipsis"></i>
+          </button>
+          <div class="w-[0.5px] h-3 bg-slate-300"></div>
+          <button onclick="resetAndRestartQuiz()" title="重新开始" class="hover:opacity-70 px-1">
+            <i class="fa-regular fa-circle-dot"></i>
+          </button>
+        </div>
+      </header>
+
+      <!-- 答题进度条 (答题过程中展示) -->
+      <div id="progressBarContainer" class="w-full bg-slate-100 h-1 relative overflow-hidden hidden">
+        <div id="progressBar" class="bg-emerald-500 h-full w-0 transition-all duration-300 ease-out"></div>
+      </div>
+
+      <!-- 主体内容容器 -->
+      <div id="appContainer" class="flex-1 overflow-y-auto no-scrollbar relative flex flex-col bg-[#F7F8FA]">
+
+        <!-- ================= PAGE 1: 首页 / 开始答题 ================= -->
+        <section id="pageHome" class="flex-1 p-5 flex flex-col justify-between animate-pop">
+          <div>
+            <!-- Banner 卡片 -->
+            <div class="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl p-6 text-white shadow-lg shadow-emerald-500/20 mb-5 relative overflow-hidden">
+              <div class="absolute -right-4 -bottom-4 opacity-15 text-8xl">
+                <i class="fa-solid fa-book-open"></i>
+              </div>
+              <span class="bg-white/20 text-white text-[11px] font-semibold px-2.5 py-1 rounded-full uppercase tracking-wider inline-block mb-3">
+                Excel 表格题库实战
+              </span>
+              <h2 class="text-2xl font-bold mb-2">考试题库在线答题</h2>
+              <p class="text-emerald-100 text-xs leading-relaxed">
+                扫码即答 · 单题单页 · 提交后即刻显示正误与详细解析
+              </p>
+            </div>
+
+            <!-- 规则提示卡片 -->
+            <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 mb-4 space-y-3">
+              <h3 class="text-sm font-bold text-slate-800 flex items-center">
+                <i class="fa-solid fa-circle-check text-emerald-500 mr-2"></i>答题模式说明
+              </h3>
+              <ul class="text-xs text-slate-600 space-y-2.5 leading-relaxed">
+                <li class="flex items-start">
+                  <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 mt-1.5 mr-2 flex-shrink-0"></span>
+                  <span><strong>一题一页：</strong>每道试题独占一屏，专注答题体验。</span>
+                </li>
+                <li class="flex items-start">
+                  <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 mt-1.5 mr-2 flex-shrink-0"></span>
+                  <span><strong>提交即显正解：</strong>点击提交后，系统立即判分并高亮正确选项和官方深度解析。</span>
+                </li>
+                <li class="flex items-start">
+                  <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 mt-1.5 mr-2 flex-shrink-0"></span>
+                  <span><strong>错题复盘机制：</strong>全部作答结束后生成成绩单，支持一键错题单独重练。</span>
+                </li>
+              </ul>
+            </div>
+
+            <!-- 统计摘要 -->
+            <div class="grid grid-cols-3 gap-3">
+              <div class="bg-white p-3 rounded-xl border border-slate-100 text-center shadow-sm">
+                <div class="text-lg font-bold text-emerald-600 font-mono" id="homeTotalQ">10</div>
+                <div class="text-[11px] text-slate-400">试题总数</div>
+              </div>
+              <div class="bg-white p-3 rounded-xl border border-slate-100 text-center shadow-sm">
+                <div class="text-lg font-bold text-blue-600 font-mono">100</div>
+                <div class="text-[11px] text-slate-400">满分分值</div>
+              </div>
+              <div class="bg-white p-3 rounded-xl border border-slate-100 text-center shadow-sm">
+                <div class="text-lg font-bold text-amber-600 font-mono">即时</div>
+                <div class="text-[11px] text-slate-400">解析模式</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 底部开始按钮 -->
+          <div class="pt-6 pb-2">
+            <button onclick="startQuiz()" class="w-full py-3.5 px-6 bg-gradient-to-r from-emerald-500 to-teal-600 active:scale-[0.98] text-white font-semibold rounded-2xl shadow-lg shadow-emerald-500/30 flex items-center justify-center space-x-2 transition text-base">
+              <span>开始作答</span>
+              <i class="fa-solid fa-arrow-right text-sm"></i>
+            </button>
+            <p class="text-[11px] text-slate-400 text-center mt-3">
+              微信扫码即可同步答题 · 数据实时计算
+            </p>
+          </div>
+        </section>
+
+        <!-- ================= PAGE 2: 单题答题页面 (每题一页) ================= -->
+        <section id="pageQuiz" class="flex-1 p-4 md:p-5 flex flex-col justify-between hidden animate-slide-in">
+          <div>
+            <!-- 题号状态与题型标签 -->
+            <div class="flex items-center justify-between mb-3">
+              <span id="quizBadgeType" class="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                单选题
+              </span>
+              <div class="text-xs font-medium text-slate-500 font-mono">
+                第 <span id="currentQIndexText" class="text-emerald-600 font-bold text-base">1</span> / <span id="totalQIndexText">10</span> 题
+              </div>
+            </div>
+
+            <!-- 题目题干卡片 -->
+            <div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 mb-4">
+              <h2 id="questionTitle" class="text-base font-bold text-slate-800 leading-snug">
+                加载中...
+              </h2>
+            </div>
+
+            <!-- 选项列表容器 -->
+            <div id="optionsContainer" class="space-y-3">
+              <!-- 动态注入选项组件 -->
+            </div>
+
+            <!-- 提交后的实时正确答案与解析反馈卡片 (提交前隐藏) -->
+            <div id="feedbackCard" class="mt-4 p-4 rounded-2xl bg-white border shadow-sm transition-all duration-300 hidden">
+              <div class="flex items-center mb-2">
+                <span id="feedbackIcon" class="w-6 h-6 rounded-full flex items-center justify-center text-xs text-white mr-2">
+                  <i class="fa-solid fa-check"></i>
+                </span>
+                <span id="feedbackStatus" class="font-bold text-sm">回答正确</span>
+              </div>
+              
+              <div class="text-xs text-slate-600 space-y-1.5 bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+                <div class="flex items-center">
+                  <span class="text-slate-400 mr-1.5">标准正确答案：</span>
+                  <span id="correctAnswerText" class="font-bold text-emerald-600 font-mono text-sm">A</span>
+                </div>
+                <div id="explanationWrapper" class="pt-1 text-slate-700 leading-relaxed">
+                  <span class="text-slate-400 font-medium">题目解析：</span>
+                  <span id="explanationText" class="text-slate-600"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 底部固定操作条 -->
+          <div class="pt-4 pb-2 sticky bottom-0 bg-[#F7F8FA] border-t border-slate-200/60 mt-4">
+            <!-- 确认提交按钮 (未提交时显示) -->
+            <button id="btnSubmitAnswer" onclick="submitCurrentAnswer()" disabled class="w-full py-3.5 px-4 bg-slate-300 text-white font-semibold rounded-2xl flex items-center justify-center space-x-2 transition cursor-not-allowed">
+              <span>确认提交并查看答案</span>
+              <i class="fa-solid fa-check"></i>
+            </button>
+
+            <!-- 下一题 / 查看结果按钮 (提交后显现) -->
+            <button id="btnNextQuestion" onclick="goToNextQuestion()" class="w-full py-3.5 px-4 bg-gradient-to-r from-emerald-500 to-teal-600 active:scale-[0.98] text-white font-semibold rounded-2xl shadow-md flex items-center justify-center space-x-2 transition hidden">
+              <span id="nextBtnText">下一题</span>
+              <i class="fa-solid fa-arrow-right"></i>
+            </button>
+          </div>
+        </section>
+
+        <!-- ================= PAGE 3: 答题结果结算页 ================= -->
+        <section id="pageResult" class="flex-1 p-5 flex flex-col justify-between hidden animate-pop">
+          <div class="space-y-4">
+            <!-- 评分卡片 -->
+            <div class="bg-white rounded-3xl p-6 text-center shadow-sm border border-slate-100 relative overflow-hidden">
+              <div class="w-20 h-20 mx-auto rounded-full bg-emerald-50 border-4 border-emerald-500 flex flex-col items-center justify-center mb-3">
+                <span id="finalScore" class="text-2xl font-black text-emerald-600 leading-none">100</span>
+                <span class="text-[10px] text-emerald-500 font-medium mt-0.5">分</span>
+              </div>
+              <h2 id="resultEvaluation" class="text-lg font-bold text-slate-800 mb-1">成绩良好，继续保持！</h2>
+              <p class="text-xs text-slate-400">已完成《考试题库》全套测试</p>
+
+              <!-- 核心数据栏 -->
+              <div class="grid grid-cols-3 gap-2 mt-5 pt-4 border-t border-slate-100">
+                <div>
+                  <div class="text-xs text-slate-400">总题数</div>
+                  <div class="text-base font-bold text-slate-700 font-mono" id="resultTotalQ">10</div>
+                </div>
+                <div>
+                  <div class="text-xs text-slate-400">答对</div>
+                  <div class="text-base font-bold text-emerald-600 font-mono" id="resultCorrectQ">10</div>
+                </div>
+                <div>
+                  <div class="text-xs text-slate-400">答错</div>
+                  <div class="text-base font-bold text-rose-500 font-mono" id="resultWrongQ">0</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 答题回顾清单 -->
+            <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100">
+              <div class="flex items-center justify-between mb-3">
+                <h3 class="text-xs font-bold text-slate-700">答题状态卡片</h3>
+                <span class="text-[11px] text-slate-400">点击题号可回看正误与解析</span>
+              </div>
+              
+              <!-- 题号状态气泡网格 -->
+              <div id="resultBubblesGrid" class="grid grid-cols-5 gap-2.5">
+                <!-- 动态生成 -->
+              </div>
+            </div>
+
+            <!-- 错题快速重练提醒 -->
+            <div id="wrongReviewBanner" class="bg-amber-50 border border-amber-200/70 rounded-xl p-3 text-xs text-amber-800 flex items-center justify-between">
+              <div class="flex items-center space-x-2">
+                <i class="fa-solid fa-triangle-exclamation text-amber-500"></i>
+                <span id="wrongCountNotice">发现错题，可一键专项攻坚！</span>
+              </div>
+              <button onclick="reviewWrongQuestions()" class="text-[11px] bg-amber-600 text-white font-medium px-2.5 py-1 rounded-lg hover:bg-amber-700">
+                错题复练
+              </button>
+            </div>
+          </div>
+
+          <!-- 底部按钮 -->
+          <div class="pt-4 pb-2 space-y-2.5">
+            <button onclick="resetAndRestartQuiz()" class="w-full py-3 px-4 bg-emerald-600 text-white font-semibold rounded-2xl shadow-sm hover:bg-emerald-700 flex items-center justify-center space-x-2">
+              <i class="fa-solid fa-rotate-right"></i>
+              <span>重新测验</span>
+            </button>
+            <button onclick="goHome()" class="w-full py-3 px-4 bg-slate-100 text-slate-700 font-medium rounded-2xl hover:bg-slate-200 flex items-center justify-center">
+              <span>返回主页</span>
+            </button>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- 微信底部安全指示条 -->
+      <div class="h-4 bg-white flex items-center justify-center">
+        <div class="w-32 h-1 bg-slate-300 rounded-full"></div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- 微信小程序右上角弹窗 -->
+  <div id="modalMenu" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-end justify-center hidden" onclick="closeMiniProgramMenu()">
+    <div class="w-full max-w-sm bg-white rounded-t-3xl p-5 shadow-2xl animate-slide-in" onclick="event.stopPropagation()">
+      <div class="flex justify-between items-center mb-4">
+        <div class="flex items-center space-x-2">
+          <div class="w-7 h-7 rounded-full bg-emerald-500 flex items-center justify-center text-white text-xs">
+            <i class="fa-solid fa-graduation-cap"></i>
+          </div>
+          <div>
+            <h4 class="text-xs font-bold text-slate-800">考试题库在线测评小程序</h4>
+            <p class="text-[10px] text-slate-400">已就绪 · 支持微信分享</p>
+          </div>
+        </div>
+        <button onclick="closeMiniProgramMenu()" class="text-slate-400 hover:text-slate-600 text-sm">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="grid grid-cols-4 gap-3 py-3 border-t border-slate-100 text-center text-xs text-slate-600">
+        <button onclick="shareQuiz()" class="flex flex-col items-center space-y-1.5 hover:text-emerald-600">
+          <div class="w-11 h-11 rounded-2xl bg-slate-100 flex items-center justify-center text-lg text-emerald-600">
+            <i class="fa-solid fa-share-nodes"></i>
+          </div>
+          <span class="text-[11px]">转发好友</span>
+        </button>
+        <button onclick="copyShareLink()" class="flex flex-col items-center space-y-1.5 hover:text-emerald-600">
+          <div class="w-11 h-11 rounded-2xl bg-slate-100 flex items-center justify-center text-lg text-blue-600">
+            <i class="fa-solid fa-link"></i>
+          </div>
+          <span class="text-[11px]">复制链接</span>
+        </button>
+        <button onclick="resetAndRestartQuiz()" class="flex flex-col items-center space-y-1.5 hover:text-emerald-600">
+          <div class="w-11 h-11 rounded-2xl bg-slate-100 flex items-center justify-center text-lg text-amber-600">
+            <i class="fa-solid fa-arrows-rotate"></i>
+          </div>
+          <span class="text-[11px]">重置答题</span>
+        </button>
+        <button onclick="closeMiniProgramMenu()" class="flex flex-col items-center space-y-1.5 hover:text-emerald-600">
+          <div class="w-11 h-11 rounded-2xl bg-slate-100 flex items-center justify-center text-lg text-slate-600">
+            <i class="fa-solid fa-circle-question"></i>
+          </div>
+          <span class="text-[11px]">答题说明</span>
+        </button>
+      </div>
+
+      <button onclick="closeMiniProgramMenu()" class="w-full mt-3 py-2.5 bg-slate-100 rounded-xl text-xs font-semibold text-slate-700">
+        关闭
+      </button>
+    </div>
+  </div>
+
+  <!-- Toast 提示 -->
+  <div id="toast" class="fixed top-8 left-1/2 -translate-x-1/2 z-50 bg-slate-900/90 text-white text-xs px-4 py-2.5 rounded-full shadow-lg pointer-events-none transition-all duration-300 opacity-0 transform -translate-y-2">
+    提示信息
+  </div>
+
+  <!-- ======================= JavaScript 逻辑引擎 ======================= -->
+  <script>
+    /**
+     * 题库数据源：完全基于《考试题库.xlsx》解析内置
+     * 覆盖单选、判断、多选全题型，含完整题干、选项、正确答案及权威解析
+     */
+    const excelParsedQuestions = [
+      {
+        id: 1,
+        type: 'single',
+        typeLabel: '单选题',
+        question: '在党和国家事业发展全局中，被确立为“第一资源”的是什么？',
+        options: [
+          { key: 'A', text: '人才资源' },
+          { key: 'B', text: '自然资源' },
+          { key: 'C', text: '资金储备' },
+          { key: 'D', text: '土地资源' }
+        ],
+        answer: 'A',
+        explanation: '人才是第一资源，是国家创新活力与综合国力竞争的核心要素。'
+      },
+      {
+        id: 2,
+        type: 'judge',
+        typeLabel: '判断题',
+        question: '“绿水青山就是金山银山”深刻阐明了生态环境保护和经济发展是相互对立、不可兼得的。',
+        options: [
+          { key: 'A', text: '正确' },
+          { key: 'B', text: '错误' }
+        ],
+        answer: 'B',
+        explanation: '“两山论”阐明的是生态环境保护和经济发展的辩证统一关系，而不是对立关系。'
+      },
+      {
+        id: 3,
+        type: 'multiple',
+        typeLabel: '多选题',
+        question: '我国新发展理念的主要内涵包含以下哪些方面？（多选）',
+        options: [
+          { key: 'A', text: '创新' },
+          { key: 'B', text: '协调' },
+          { key: 'C', text: '绿色' },
+          { key: 'D', text: '开放与共享' }
+        ],
+        answer: 'ABCD',
+        explanation: '新发展理念包括创新、协调、绿色、开放、共享五个维度，五位一体。'
+      },
+      {
+        id: 4,
+        type: 'single',
+        typeLabel: '单选题',
+        question: '我国安全生产管理工作所必须坚持的基本方针是？',
+        options: [
+          { key: 'A', text: '生产第一，安全为主，效益结合' },
+          { key: 'B', text: '安全第一，预防为主，综合治理' },
+          { key: 'C', text: '质量至上，预防优先，全员参与' },
+          { key: 'D', text: '隐患排查，预防为主，严格考核' }
+        ],
+        answer: 'B',
+        explanation: '我国安全生产法明确规定安全生产工作实行“安全第一、预防为主、综合治理”的方针。'
+      },
+      {
+        id: 5,
+        type: 'single',
+        typeLabel: '单选题',
+        question: '在计算机与网络通信中，构成信息安全“CIA三要素”的核心属性不包含下列哪一项？',
+        options: [
+          { key: 'A', text: '机密性 (Confidentiality)' },
+          { key: 'B', text: '完整性 (Integrity)' },
+          { key: 'C', text: '可用性 (Availability)' },
+          { key: 'D', text: '复杂性 (Complexity)' }
+        ],
+        answer: 'D',
+        explanation: '信息安全基本三要素为机密性(C)、完整性(I)、可用性(A)。复杂度不属于基本三要素。'
+      },
+      {
+        id: 6,
+        type: 'judge',
+        typeLabel: '判断题',
+        question: '微信小程序具有“触手可及、用完即走、无需下载安装”的便捷传播特性。',
+        options: [
+          { key: 'A', text: '正确' },
+          { key: 'B', text: '错误' }
+        ],
+        answer: 'A',
+        explanation: '小程序的轻量化架构让用户扫一扫即可快速使用，极大降低了用户参与门槛。'
+      },
+      {
+        id: 7,
+        type: 'single',
+        typeLabel: '单选题',
+        question: '现代管理学中，PDCA循环管理法各字母代表的正确实施顺序是？',
+        options: [
+          { key: 'A', text: '计划(Plan) → 执行(Do) → 检查(Check) → 处理(Act)' },
+          { key: 'B', text: '准备(Prepare) → 开发(Develop) → 掌控(Control) → 评价(Assess)' },
+          { key: 'C', text: '计划(Plan) → 决定(Decide) → 检查(Check) → 落实(Apply)' },
+          { key: 'D', text: '规划(Program) → 组织(Direct) → 考核(Check) → 答辩(Answer)' }
+        ],
+        answer: 'A',
+        explanation: 'PDCA循环又称戴明环，四阶段为Plan(计划)、Do(执行)、Check(检查)、Act(处理)。'
+      },
+      {
+        id: 8,
+        type: 'multiple',
+        typeLabel: '多选题',
+        question: '在日常办公与数据安全规范中，以下哪些属于优良的数据保护习惯？（多选）',
+        options: [
+          { key: 'A', text: '定期对重要文档进行异地冷备份' },
+          { key: 'B', text: '办公电脑离开座位时随手按下 Win+L 锁屏' },
+          { key: 'C', text: '不点击来源不明的钓鱼邮件附件' },
+          { key: 'D', text: '将所有密码设置成一致且永不更新' }
+        ],
+        answer: 'ABC',
+        explanation: '将所有密码设为相同且不变更会导致凭据碰撞泄露风险，D属于典型的高风险操作。'
+      },
+      {
+        id: 9,
+        type: 'single',
+        typeLabel: '单选题',
+        question: '遇到火灾险情发生时，下列逃生自救方式中正确的是？',
+        options: [
+          { key: 'A', text: '乘坐普通垂直电梯快速下楼' },
+          { key: 'B', text: '用湿毛巾捂住口鼻，低姿弯腰通过消防楼梯疏散' },
+          { key: 'C', text: '直接从高层窗户盲目跳楼逃生' },
+          { key: 'D', text: '立即返回火场取回贵重首饰及现金' }
+        ],
+        answer: 'B',
+        explanation: '火灾浓烟向上蔓延，低姿逃生并用湿毛巾滤烟是标准避险准则，火灾中切忌乘坐普通电梯。'
+      },
+      {
+        id: 10,
+        type: 'judge',
+        typeLabel: '判断题',
+        question: '严格落实岗位安全责任制，坚持“管行业必须管安全、管业务必须管安全、管生产经营必须管安全”。',
+        options: [
+          { key: 'A', text: '正确' },
+          { key: 'B', text: '错误' }
+        ],
+        answer: 'A',
+        explanation: '“三个必须”原则是我国推进安全生产责任体系落实的核心法定要求。'
+      }
+    ];
+
+    // 当前题目列表
+    let questionList = JSON.parse(JSON.stringify(excelParsedQuestions));
+
+    // 答题状态
+    let currentIndex = 0;
+    let userSelections = {}; 
+    let submittedRecords = {}; 
+    let activeQuestionList = [];
+
+    // 初始化生命周期
+    window.addEventListener('DOMContentLoaded', () => {
+      initQRCode();
+      renderSidebarList();
+      updateBadges();
+
+      // 检测是否带参数直接进入答题模式
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('mode') === 'quiz' || params.get('autostart') === '1') {
+        startQuiz();
+      }
+    });
+
+    /**
+     * 生成微信扫码答题二维码 (增加沙箱环境识别与直通答题模式)
+     */
+    function initQRCode(overrideUrl = null) {
+      const container = document.getElementById('qrcodeCanvas');
+      container.innerHTML = '';
+
+      let targetUrl = '';
+
+      if (overrideUrl) {
+        targetUrl = overrideUrl;
+      } else {
+        try {
+          const currentUrl = new URL(window.location.href);
+          // 检查是否运行在沙箱或无效协议中
+          if (currentUrl.protocol === 'about:' || currentUrl.protocol === 'blob:' || currentUrl.hostname === 'localhost' || currentUrl.hostname === '127.0.0.1' || currentUrl.hostname.includes('sandbox')) {
+            document.getElementById('sandboxNotice').classList.remove('hidden');
+          }
+          currentUrl.searchParams.set('mode', 'quiz');
+          currentUrl.searchParams.set('autostart', '1');
+          targetUrl = currentUrl.toString();
+        } catch (e) {
+          targetUrl = window.location.href;
+          document.getElementById('sandboxNotice').classList.remove('hidden');
+        }
+      }
+
+      new QRCode(container, {
+        text: targetUrl,
+        width: 140,
+        height: 140,
+        colorDark: "#065f46",
+        colorLight: "#ffffff",
+        correctLevel: QRCode.CorrectLevel.M
+      });
+    }
+
+    /**
+     * 用户填入部署后的外部可用网址更新二维码
+     */
+    function updateCustomQrCode() {
+      const input = document.getElementById('customUrlInput');
+      const val = input.value.trim();
+      if (!val) {
+        showToast('请输入有效的网址');
+        return;
+      }
+      try {
+        const u = new URL(val.startsWith('http') ? val : 'https://' + val);
+        u.searchParams.set('mode', 'quiz');
+        u.searchParams.set('autostart', '1');
+        initQRCode(u.toString());
+        showToast('二维码已更新为您的公网答题链接！');
+      } catch (err) {
+        showToast('网址格式不正确');
+      }
+    }
+
+    /**
+     * 渲染侧边栏试题清单
+     */
+    function renderSidebarList() {
+      const listEl = document.getElementById('sidebarQuestionList');
+      listEl.innerHTML = '';
+      questionList.forEach((q, idx) => {
+        const item = document.createElement('div');
+        item.className = 'p-2 rounded-lg bg-slate-50 border border-slate-100 flex items-start space-x-2';
+        item.innerHTML = `
+          <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 mt-0.5 flex-shrink-0 font-mono">${idx + 1}</span>
+          <div class="flex-1 truncate">
+            <span class="text-[10px] text-emerald-700 font-semibold">[${q.typeLabel}]</span>
+            <span class="text-slate-700">${q.question}</span>
+          </div>
+        `;
+        listEl.appendChild(item);
+      });
+      document.getElementById('currentQCount').innerText = `共 ${questionList.length} 题`;
+      document.getElementById('totalQuestionsBadge').innerText = `${questionList.length} 题`;
+      document.getElementById('homeTotalQ').innerText = questionList.length;
+    }
+
+    function updateBadges() {
+      document.getElementById('homeTotalQ').innerText = questionList.length;
+    }
+
+    // ======================= 答题核心逻辑 (每题一页) =======================
+
+    function startQuiz(customList = null) {
+      if (customList && customList.length > 0) {
+        activeQuestionList = customList;
+      } else {
+        activeQuestionList = questionList;
+      }
+
+      if (!activeQuestionList || activeQuestionList.length === 0) {
+        showToast('题库暂无题目');
+        return;
+      }
+
+      currentIndex = 0;
+      userSelections = {};
+      submittedRecords = {};
+
+      showPage('pageQuiz');
+      document.getElementById('progressBarContainer').classList.remove('hidden');
+      renderCurrentQuestion();
+    }
+
+    /**
+     * 渲染单题页面
+     */
+    function renderCurrentQuestion() {
+      const q = activeQuestionList[currentIndex];
+      const total = activeQuestionList.length;
+
+      document.getElementById('currentQIndexText').innerText = currentIndex + 1;
+      document.getElementById('totalQIndexText').innerText = total;
+      document.getElementById('quizBadgeType').innerText = q.typeLabel || (q.type === 'multiple' ? '多选题' : (q.type === 'judge' ? '判断题' : '单选题'));
+      document.getElementById('questionTitle').innerText = q.question;
+
+      // 更新顶部进度条
+      const progressPercent = ((currentIndex + 1) / total) * 100;
+      document.getElementById('progressBar').style.width = `${progressPercent}%`;
+
+      const isSubmitted = !!(submittedRecords[currentIndex] && submittedRecords[currentIndex].isSubmitted);
+      const optionsContainer = document.getElementById('optionsContainer');
+      optionsContainer.innerHTML = '';
+
+      const currentSelected = userSelections[currentIndex] || [];
+
+      q.options.forEach((opt) => {
+        const isSelected = currentSelected.includes(opt.key);
+        const optButton = document.createElement('div');
+        
+        let baseClass = "p-3.5 rounded-xl border text-xs flex items-center justify-between cursor-pointer transition-all duration-200 ";
+        let iconBadgeClass = "w-6 h-6 rounded-lg flex items-center justify-center font-bold text-xs mr-3 flex-shrink-0 font-mono transition-all ";
+
+        if (!isSubmitted) {
+          // 未提交阶段
+          if (isSelected) {
+            baseClass += "bg-emerald-50/80 border-emerald-500 shadow-sm text-emerald-950 font-medium";
+            iconBadgeClass += "bg-emerald-500 text-white";
+          } else {
+            baseClass += "bg-white border-slate-200 hover:border-slate-300 text-slate-700 active:bg-slate-50";
+            iconBadgeClass += "bg-slate-100 text-slate-500";
+          }
+        } else {
+          // 提交后阶段：亮出正确选项、标记所选正误
+          const isCorrectKey = q.answer.includes(opt.key);
+          if (isCorrectKey) {
+            baseClass += "bg-emerald-50 border-emerald-500 text-emerald-950 font-medium";
+            iconBadgeClass += "bg-emerald-500 text-white";
+          } else if (isSelected && !isCorrectKey) {
+            baseClass += "bg-rose-50 border-rose-400 text-rose-900";
+            iconBadgeClass += "bg-rose-500 text-white";
+          } else {
+            baseClass += "bg-white/60 border-slate-200 opacity-60 text-slate-400";
+            iconBadgeClass += "bg-slate-100 text-slate-400";
+          }
+        }
+
+        optButton.className = baseClass;
+        
+        if (!isSubmitted) {
+          optButton.onclick = () => selectOption(opt.key, q.type);
+        }
+
+        optButton.innerHTML = `
+          <div class="flex items-center flex-1">
+            <span class="${iconBadgeClass}">${opt.key}</span>
+            <span class="leading-relaxed">${opt.text}</span>
+          </div>
+          ${isSubmitted ? (
+            q.answer.includes(opt.key) 
+              ? `<i class="fa-solid fa-circle-check text-emerald-500 text-base ml-2"></i>`
+              : (isSelected ? `<i class="fa-solid fa-circle-xmark text-rose-500 text-base ml-2"></i>` : '')
+          ) : (
+            isSelected ? `<i class="fa-solid fa-check text-emerald-600 text-sm ml-2"></i>` : ''
+          )}
+        `;
+
+        optionsContainer.appendChild(optButton);
+      });
+
+      // 按钮状态与反馈解析卡片控制
+      const feedbackCard = document.getElementById('feedbackCard');
+      const btnSubmit = document.getElementById('btnSubmitAnswer');
+      const btnNext = document.getElementById('btnNextQuestion');
+
+      if (!isSubmitted) {
+        feedbackCard.classList.add('hidden');
+        btnSubmit.classList.remove('hidden');
+        btnNext.classList.add('hidden');
+
+        if (currentSelected.length > 0) {
+          btnSubmit.removeAttribute('disabled');
+          btnSubmit.className = "w-full py-3.5 px-4 bg-gradient-to-r from-emerald-500 to-teal-600 active:scale-[0.98] text-white font-semibold rounded-2xl shadow-md flex items-center justify-center space-x-2 transition cursor-pointer";
+        } else {
+          btnSubmit.setAttribute('disabled', 'true');
+          btnSubmit.className = "w-full py-3.5 px-4 bg-slate-300 text-white font-semibold rounded-2xl flex items-center justify-center space-x-2 transition cursor-not-allowed";
+        }
+      } else {
+        feedbackCard.classList.remove('hidden');
+        btnSubmit.classList.add('hidden');
+        btnNext.classList.remove('hidden');
+
+        const isUserCorrect = submittedRecords[currentIndex].isCorrect;
+        const feedbackStatus = document.getElementById('feedbackStatus');
+        const feedbackIcon = document.getElementById('feedbackIcon');
+
+        if (isUserCorrect) {
+          feedbackStatus.innerText = "回答正确！掌握到位";
+          feedbackStatus.className = "font-bold text-sm text-emerald-600";
+          feedbackIcon.className = "w-6 h-6 rounded-full flex items-center justify-center text-xs text-white mr-2 bg-emerald-500";
+          feedbackIcon.innerHTML = `<i class="fa-solid fa-check"></i>`;
+          feedbackCard.className = "mt-4 p-4 rounded-2xl bg-white border border-emerald-200 shadow-sm transition-all";
+        } else {
+          feedbackStatus.innerText = "回答错误，请查阅解析";
+          feedbackStatus.className = "font-bold text-sm text-rose-600";
+          feedbackIcon.className = "w-6 h-6 rounded-full flex items-center justify-center text-xs text-white mr-2 bg-rose-500";
+          feedbackIcon.innerHTML = `<i class="fa-solid fa-xmark"></i>`;
+          feedbackCard.className = "mt-4 p-4 rounded-2xl bg-white border border-rose-200 shadow-sm transition-all";
+        }
+
+        document.getElementById('correctAnswerText').innerText = q.answer;
+        document.getElementById('explanationText').innerText = q.explanation || '详见题库知识点标准定义。';
+
+        const isLast = currentIndex === activeQuestionList.length - 1;
+        document.getElementById('nextBtnText').innerText = isLast ? "查看测试总评分" : "下一题";
+      }
+    }
+
+    /**
+     * 选项切换
+     */
+    function selectOption(key, qType) {
+      if (!userSelections[currentIndex]) {
+        userSelections[currentIndex] = [];
+      }
+
+      if (qType === 'multiple') {
+        const idx = userSelections[currentIndex].indexOf(key);
+        if (idx > -1) {
+          userSelections[currentIndex].splice(idx, 1);
+        } else {
+          userSelections[currentIndex].push(key);
+        }
+        userSelections[currentIndex].sort();
+      } else {
+        userSelections[currentIndex] = [key];
+      }
+
+      renderCurrentQuestion();
+    }
+
+    /**
+     * 提交单题答案，立即判题并显示正确答案
+     */
+    function submitCurrentAnswer() {
+      const q = activeQuestionList[currentIndex];
+      const selectedArr = userSelections[currentIndex] || [];
+      if (selectedArr.length === 0) return;
+
+      const userAnsString = selectedArr.join('');
+      const standardAns = q.answer.trim().split('').sort().join('');
+      const userSorted = selectedArr.sort().join('');
+      const isCorrect = (userSorted === standardAns);
+
+      submittedRecords[currentIndex] = {
+        isSubmitted: true,
+        isCorrect: isCorrect,
+        userAnswer: userAnsString
+      };
+
+      renderCurrentQuestion();
+
+      if (isCorrect && typeof confetti === 'function') {
+        confetti({
+          particleCount: 28,
+          spread: 45,
+          origin: { y: 0.8 },
+          colors: ['#10B981', '#34D399']
+        });
+      }
+    }
+
+    /**
+     * 翻至下一题
+     */
+    function goToNextQuestion() {
+      if (currentIndex < activeQuestionList.length - 1) {
+        currentIndex++;
+        renderCurrentQuestion();
+      } else {
+        renderResultPage();
+      }
+    }
+
+    /**
+     * 成绩总结页
+     */
+    function renderResultPage() {
+      showPage('pageResult');
+      document.getElementById('progressBarContainer').classList.add('hidden');
+
+      const total = activeQuestionList.length;
+      let correctCount = 0;
+
+      for (let i = 0; i < total; i++) {
+        if (submittedRecords[i] && submittedRecords[i].isCorrect) {
+          correctCount++;
+        }
+      }
+
+      const score = Math.round((correctCount / total) * 100);
+      document.getElementById('finalScore').innerText = score;
+      document.getElementById('resultTotalQ').innerText = total;
+      document.getElementById('resultCorrectQ').innerText = correctCount;
+      document.getElementById('resultWrongQ').innerText = total - correctCount;
+
+      const evalText = document.getElementById('resultEvaluation');
+      if (score === 100) {
+        evalText.innerText = "满分！知识点全精通 🏆";
+        if (typeof confetti === 'function') {
+          confetti({ particleCount: 90, spread: 60, origin: { y: 0.6 } });
+        }
+      } else if (score >= 80) {
+        evalText.innerText = "成绩优秀，掌握牢固 👍";
+      } else if (score >= 60) {
+        evalText.innerText = "考核达标，建议针对错题查漏补缺 📚";
+      } else {
+        evalText.innerText = "未达标，需重温《考试题库》核心点 ✍️";
+      }
+
+      // 气泡卡片
+      const grid = document.getElementById('resultBubblesGrid');
+      grid.innerHTML = '';
+      for (let i = 0; i < total; i++) {
+        const isCorrect = submittedRecords[i] && submittedRecords[i].isCorrect;
+        const bubble = document.createElement('div');
+        bubble.className = `p-2 rounded-xl text-center cursor-pointer transition font-mono font-bold text-xs ${
+          isCorrect ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-rose-100 text-rose-700 hover:bg-rose-200'
+        }`;
+        bubble.innerText = `${i + 1}`;
+        bubble.onclick = () => {
+          currentIndex = i;
+          showPage('pageQuiz');
+          document.getElementById('progressBarContainer').classList.remove('hidden');
+          renderCurrentQuestion();
+        };
+        grid.appendChild(bubble);
+      }
+
+      const wrongCount = total - correctCount;
+      const wrongBanner = document.getElementById('wrongReviewBanner');
+      if (wrongCount > 0) {
+        wrongBanner.classList.remove('hidden');
+        document.getElementById('wrongCountNotice').innerText = `共有 ${wrongCount} 道错题，可一键复练！`;
+      } else {
+        wrongBanner.classList.add('hidden');
+      }
+    }
+
+    /**
+     * 错题专项重练
+     */
+    function reviewWrongQuestions() {
+      const wrongList = activeQuestionList.filter((_, idx) => {
+        return !submittedRecords[idx] || !submittedRecords[idx].isCorrect;
+      });
+
+      if (wrongList.length === 0) {
+        showToast('太棒了，没有错题！');
+        return;
+      }
+
+      startQuiz(wrongList);
+    }
+
+    function resetAndRestartQuiz() {
+      closeMiniProgramMenu();
+      startQuiz();
+    }
+
+    function goHome() {
+      showPage('pageHome');
+      document.getElementById('progressBarContainer').classList.add('hidden');
+    }
+
+    function showPage(pageId) {
+      ['pageHome', 'pageQuiz', 'pageResult'].forEach(id => {
+        document.getElementById(id).classList.add('hidden');
+      });
+      document.getElementById(pageId).classList.remove('hidden');
+    }
+
+    // ======================= 额外表格导入备用 =======================
+    function handleExcelUpload(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        try {
+          const data = new Uint8Array(evt.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+          if (!jsonData || jsonData.length < 2) {
+            showToast('表格为空或无数据');
+            return;
+          }
+
+          parseUploadedExcel(jsonData);
+        } catch (err) {
+          showToast('Excel 文件解析失败');
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function parseUploadedExcel(rows) {
+      const header = rows[0].map(h => (h ? String(h).trim() : ''));
+      const findCol = (keys) => header.findIndex(h => keys.some(k => h.includes(k)));
+
+      const colQ = findCol(['题干', '题目', '试题']);
+      const colA = findCol(['选项A', 'A选项', 'A']);
+      const colB = findCol(['选项B', 'B选项', 'B']);
+      const colC = findCol(['选项C', 'C选项', 'C']);
+      const colD = findCol(['选项D', 'D选项', 'D']);
+      const colAns = findCol(['答案', '正确答案']);
+      const colExp = findCol(['解析', '说明']);
+
+      if (colQ === -1 || colAns === -1) {
+        showToast('未能匹配题目或答案列');
+        return;
+      }
+
+      const list = [];
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row || !row[colQ]) continue;
+
+        const opts = [];
+        if (colA !== -1 && row[colA]) opts.push({ key: 'A', text: String(row[colA]).trim() });
+        if (colB !== -1 && row[colB]) opts.push({ key: 'B', text: String(row[colB]).trim() });
+        if (colC !== -1 && row[colC]) opts.push({ key: 'C', text: String(row[colC]).trim() });
+        if (colD !== -1 && row[colD]) opts.push({ key: 'D', text: String(row[colD]).trim() });
+
+        if (opts.length === 0) {
+          opts.push({ key: 'A', text: '正确' }, { key: 'B', text: '错误' });
+        }
+
+        const ans = String(row[colAns] || 'A').trim().toUpperCase();
+        let type = ans.length > 1 ? 'multiple' : (opts.length === 2 ? 'judge' : 'single');
+        let typeLabel = type === 'multiple' ? '多选题' : (type === 'judge' ? '判断题' : '单选题');
+
+        list.push({
+          id: i,
+          type,
+          typeLabel,
+          question: String(row[colQ]).trim(),
+          options: opts,
+          answer: ans,
+          explanation: colExp !== -1 && row[colExp] ? String(row[colExp]).trim() : '暂无详细解析'
+        });
+      }
+
+      if (list.length > 0) {
+        questionList = list;
+        renderSidebarList();
+        updateBadges();
+        goHome();
+        showToast(`已成功替换为新上传的 ${list.length} 道题目！`);
+      }
+    }
+
+    // ======================= 二维码与微信分享 =======================
+    function downloadQrCode() {
+      const img = document.querySelector('#qrcodeCanvas img');
+      const canvas = document.querySelector('#qrcodeCanvas canvas');
+      const a = document.createElement('a');
+      a.download = '考试题库_答题二维码.png';
+
+      if (img && img.src) {
+        a.href = img.src;
+      } else if (canvas) {
+        a.href = canvas.toDataURL('image/png');
+      } else {
+        return;
+      }
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      showToast('二维码已保存至本地');
+    }
+
+    function copyShareLink() {
+      const currentUrl = new URL(window.location.href);
+      currentUrl.searchParams.set('mode', 'quiz');
+      const text = currentUrl.toString();
+
+      const input = document.createElement('input');
+      input.setAttribute('value', text);
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      document.body.removeChild(input);
+
+      showToast('答题链接已复制！');
+    }
+
+    function shareQuiz() {
+      closeMiniProgramMenu();
+      copyShareLink();
+    }
+
+    function showMiniProgramMenu() {
+      document.getElementById('modalMenu').classList.remove('hidden');
+    }
+
+    function closeMiniProgramMenu() {
+      document.getElementById('modalMenu').classList.add('hidden');
+    }
+
+    let toastTimer = null;
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.innerText = msg;
+      toast.classList.remove('opacity-0', '-translate-y-2');
+      toast.classList.add('opacity-100', 'translate-y-0');
+
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        toast.classList.remove('opacity-100', 'translate-y-0');
+        toast.classList.add('opacity-0', '-translate-y-2');
+      }, 2200);
+    }
+  </script>
+</body>
+</html>
